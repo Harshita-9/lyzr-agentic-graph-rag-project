@@ -1,0 +1,17 @@
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+
+- Docker & Docker Compose
+- Neo4j, MongoDB, Redis
+- OpenAI API Key
+
+### Installation
+
+1. **Clone & Setup**
+```bash
+git clone <repository>
+cd agentic-graph-rag-service
+cp backend/.env.example backend/.env
+# Add your API keys to backend/.env

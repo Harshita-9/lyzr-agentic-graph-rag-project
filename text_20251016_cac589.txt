@@ -1,0 +1,20 @@
+agentic-graph-rag-service/
+├── backend/
+│   ├── src/
+│   │   ├── core/
+│   │   ├── graph/
+│   │   ├── rag/
+│   │   ├── agents/
+│   │   ├── ontology/
+│   │   ├── api/
+│   │   └── utils/
+│   ├── tests/
+│   ├── config/
+│   └── deployments/
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   └── docs/
+├── ml-pipeline/
+├── monitoring/
+└── infrastructure/

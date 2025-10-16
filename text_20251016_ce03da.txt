@@ -1,0 +1,176 @@
+
+## **23. backend/src/agents/VectorRetrievalAgent.js**
+```javascript
+import { OpenAI } from 'openai';
+import ConfigManager from '../core/ConfigManager.js';
+
+export class VectorRetrievalAgent {
+  constructor() {
+    this.openai = new OpenAI({ apiKey: ConfigManager.ai.openai.apiKey });
+    this.vectorStores = this.initializeVectorStores();
+  }
+
+  initializeVectorStores() {
+    // Initialize multiple vector stores for redundancy and performance
+    return {
+      pinecone: this.initializePinecone(),
+      weaviate: this.initializeWeaviate()
+    };
+  }
+
+  initializePinecone() {
+    const { Pinecone } = require('@pinecone-database/pinecone');
+    return new Pinecone({
+      apiKey: ConfigManager.vectorStores.pinecone.apiKey
+    }).Index('knowledge-embeddings');
+  }
+
+  initializeWeaviate() {
+    // Weaviate client initialization
+    return null; // Placeholder - implement based on chosen vector store
+  }
+
+  async retrieve(query, analysis, context = {}) {
+    console.log('🔍 Executing vector similarity search');
+    
+    const startTime = Date.now();
+    
+    try {
+      // Generate query embedding
+      const queryEmbedding = await this.generateEmbedding(query);
+      
+      // Perform semantic search
+      const results = await this.semanticSearch(queryEmbedding, {
+        topK: analysis.complexity === 'high' ? 10 : 5,
+        filters: this.buildFilters(context)
+      });
+      
+      const latency = Date.now() - startTime;
+      
+      return {
+        documents: this.formatVectorResults(results),
+        agentStrategy: 'semantic',
+        latency,
+        confidence: this.calculateSemanticConfidence(results),
+        metadata: {
+          vectorStore: 'pinecone',
+          embeddingModel: ConfigManager.ai.openai.embeddingModel,
+          resultCount: results.length
+        }
+      };
+      
+    } catch (error) {
+      console.error('Vector retrieval error:', error);
+      throw new Error(`Vector search failed: ${error.message}`);
+    }
+  }
+
+  async semanticSearch(embedding, options = {}) {
+    const { topK = 5, filters = {} } = options;
+    
+    try {
+      const results = await this.vectorStores.pinecone.query({
+        vector: embedding,
+        topK,
+        includeMetadata: true,
+        filter: filters
+      });
+      
+      return results.matches || [];
+    } catch (error) {
+      console.error('Pinecone query error:', error);
+      return [];
+    }
+  }
+
+  async generateEmbedding(text) {
+    try {
+      const response = await this.openai.embeddings.create({
+        model: ConfigManager.ai.openai.embeddingModel,
+        input: text
+      });
+      
+      return response.data[0].embedding;
+    } catch (error) {
+      console.error('Embedding generation error:', error);
+      throw new Error(`Failed to generate embedding: ${error.message}`);
+    }
+  }
+
+  formatVectorResults(vectorResults) {
+    return vectorResults.map((result, index) => ({
+      id: `vector_${result.id || index}`,
+      content: result.metadata?.text || result.metadata?.content || 'No content',
+      metadata: {
+        type: 'vector_result',
+        score: result.score,
+        source: result.metadata?.source,
+        entityTypes: result.metadata?.entityTypes || [],
+        ...result.metadata
+      },
+      score: result.score
+    }));
+  }
+
+  calculateSemanticConfidence(results) {
+    if (!results || results.length === 0) return 0.1;
+    
+    // Confidence based on top result score and result count
+    const topScore = results[0]?.score || 0;
+    const resultCount = results.length;
+    
+    let confidence = topScore; // Base confidence on top score
+    
+    // Boost for multiple high-quality results
+    if (resultCount >= 3) {
+      const averageScore = results.slice(0, 3).reduce((sum, r) => sum + r.score, 0) / 3;
+      confidence = Math.max(confidence, averageScore * 0.8);
+    }
+    
+    return Math.min(confidence, 1.0);
+  }
+
+  buildFilters(context) {
+    const filters = {};
+    
+    if (context.domain) {
+      filters.domain = { $eq: context.domain };
+    }
+    
+    if (context.entityTypes && context.entityTypes.length > 0) {
+      filters.entityType = { $in: context.entityTypes };
+    }
+    
+    return filters;
+  }
+
+  async upsertDocuments(documents) {
+    console.log(`📝 Upserting ${documents.length} documents to vector store`);
+    
+    const vectors = await Promise.all(
+      documents.map(async (doc) => {
+        const embedding = await this.generateEmbedding(doc.content);
+        
+        return {
+          id: doc.id,
+          values: embedding,
+          metadata: {
+            text: doc.content.substring(0, 1000), // Store truncated content
+            source: doc.metadata?.source,
+            entityTypes: doc.metadata?.entityTypes || [],
+            domain: doc.metadata?.domain,
+            timestamp: new Date().toISOString()
+          }
+        };
+      })
+    );
+    
+    try {
+      await this.vectorStores.pinecone.upsert(vectors);
+      console.log('✅ Documents successfully upserted to vector store');
+    } catch (error) {
+      console.error('Failed to upsert documents:', error);
+      throw error;
+    }
+  }
+}
